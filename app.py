@@ -595,22 +595,6 @@ def _parse_republika(html):
         if len(results) >= 10: break
     return results
 
-# ─── Parser + URL Registry ───────────────────────────────
-_PARSERS = {
-    'detik': _parse_detik,
-    'antara': _parse_antara,
-    'liputan6': _parse_liputan6,
-    'republika': _parse_republika,
-    'suara': _parse_suara,
-}
-
-_SEARCH_URL_TEMPLATES = {
-    'detik': lambda q: 'https://www.detik.com/search/searchall?query=' + q.replace(' ', '+'),
-    'antara': lambda q: 'https://www.antaranews.com/search/?q=' + q.replace(' ', '+'),
-    'liputan6': lambda q: 'https://www.liputan6.com/search?q=' + q.replace(' ', '+'),
-    'republika': lambda q: 'https://republika.co.id/search?q=' + q.replace(' ', '+'),
-    'suara': lambda q: 'https://www.suara.com/search?q=' + q.replace(' ', '+'),
-}
 
 
 def _parse_suara(html):
@@ -634,6 +618,24 @@ def _parse_suara(html):
 
 
 
+
+
+# ─── Parser + URL Registry ───────────────────────────────
+_PARSERS = {
+    'detik': _parse_detik,
+    'antara': _parse_antara,
+    'liputan6': _parse_liputan6,
+    'republika': _parse_republika,
+    'suara': _parse_suara,
+}
+
+_SEARCH_URL_TEMPLATES = {
+    'detik': lambda q: 'https://www.detik.com/search/searchall?query=' + q.replace(' ', '+'),
+    'antara': lambda q: 'https://www.antaranews.com/search/?q=' + q.replace(' ', '+'),
+    'liputan6': lambda q: 'https://www.liputan6.com/search?q=' + q.replace(' ', '+'),
+    'republika': lambda q: 'https://republika.co.id/search?q=' + q.replace(' ', '+'),
+    'suara': lambda q: 'https://www.suara.com/search?q=' + q.replace(' ', '+'),
+}
 
 
 def _search_single_source(source_key, query, max_results=3):
