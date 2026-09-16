@@ -477,12 +477,13 @@ def _fetch_html(url: str):
 
 
 _NEWS_SOURCES = {
-    "detik": {"display_name": "Detik.com", "tag": "DETIK", "domain": "detik.com"},
-    "antara": {"display_name": "Antara News", "tag": "ANTARA", "domain": "antaranews.com"},
-    "liputan6": {"display_name": "Liputan6 (termasuk Cek Fakta)", "tag": "LIPUTAN6", "domain": "liputan6.com"},
-    "republika": {"display_name": "Republika", "tag": "REPUBLIKA", "domain": "republika.co.id"},
-    "suara": {"display_name": "Suara.com", "tag": "SUARA", "domain": "suara.com"},
-    "okezone": {"display_name": "Okezone", "tag": "OKEZONE", "domain": "okezone.com"},
+    "detik": {"display_name": "Detik.com", "tag": "DETIK", "domain": "detik.com", "priority": 1},
+    "cnn": {"display_name": "CNN Indonesia", "tag": "CNN", "domain": "cnnindonesia.com", "priority": 2},
+    "antara": {"display_name": "Antara News", "tag": "ANTARA", "domain": "antaranews.com", "priority": 3},
+    "liputan6": {"display_name": "Liputan6 (Cek Fakta)", "tag": "LIPUTAN6", "domain": "liputan6.com", "priority": 4},
+    "republika": {"display_name": "Republika", "tag": "REPUBLIKA", "domain": "republika.co.id", "priority": 5},
+    "suara": {"display_name": "Suara.com", "tag": "SUARA", "domain": "suara.com", "priority": 6},
+    "okezone": {"display_name": "Okezone", "tag": "OKEZONE", "domain": "okezone.com", "priority": 7},
 }
 
 
@@ -607,8 +608,31 @@ def _parse_okezone(html: str):
     return results
 
 
+def _parse_cnn(html: str):
+    """Parse hasil search CNN Indonesia."""
+    results = []
+    soup = BeautifulSoup(html, _BS4_PARSER)
+    for a in soup.select("a[href]"):
+        try:
+            href = a.get("href", "")
+            title = a.get_text(strip=True)
+            if not (title and "cnnindonesia.com" in href and "/search" not in href
+                    and 25 < len(title) < 250):
+                continue
+            if any(seg in href for seg in ["category", "/author/", "/tag/"]):
+                continue
+            results.append({"title": title[:200], "url": href, "excerpt": "", "date": ""})
+        except (AttributeError, KeyError, TypeError):
+            continue
+        if len(results) >= 10:
+            break
+    return results
+
+
+
 _PARSERS = {
     "detik": _parse_detik,
+    "cnn": _parse_cnn,
     "antara": _parse_antara,
     "liputan6": _parse_liputan6,
     "republika": _parse_republika,
@@ -618,6 +642,7 @@ _PARSERS = {
 
 _SEARCH_URL_TEMPLATES = {
     "detik": lambda q: "https://www.detik.com/search/searchall?query=" + urllib.parse.quote_plus(q),
+    "cnn": lambda q: "https://www.cnnindonesia.com/search/?query=" + urllib.parse.quote_plus(q),
     "antara": lambda q: "https://www.antaranews.com/search/?q=" + urllib.parse.quote_plus(q),
     "liputan6": lambda q: "https://www.liputan6.com/search?q=" + urllib.parse.quote_plus(q),
     "republika": lambda q: "https://www.republika.co.id/search?q=" + urllib.parse.quote_plus(q),
@@ -698,7 +723,7 @@ def search_news_multi_source(query, max_per_source=3, enabled_sources=None):
         key=lambda x: (
             not x.get("is_cek_fakta", False),
             -int(x.get("matches", 0)),
-            x.get("source_key", ""),
+            _NEWS_SOURCES.get(x.get("source_key", ""), {}).get("priority", 99),
         )
     )
 
@@ -1104,19 +1129,11 @@ with st.sidebar:
     if not API_KEY:
         st.warning("Masukkan GEMINI_API_KEY di Secrets (production) atau sidebar (dev)")
     st.divider()
-    st.subheader("Model AI")
-    model_options = {
-        "gemini-3.5-flash": "Gemini 3.5 Flash (cepat)",
-        "gemini-3.8-flash": "Gemini 3.8 Flash (akurat)",
-    }
-    selected_model = st.selectbox(
-        "Pilih model", list(model_options.keys()),
-        format_func=lambda x: model_options[x]
-    )
-    st.divider()
+    # Fixed model: Gemini 3.5 Flash
+    model_name = "gemini-3.5-flash"
     st.subheader("Opsi Analisis")
     use_search = st.checkbox(
-        "Verifikasi via Google Search", value=True,
+        "Verifikasi via Google Search (Grounding)", value=False,
         help="Aktifkan untuk pencarian fakta otomatis"
     )
     st.divider()
