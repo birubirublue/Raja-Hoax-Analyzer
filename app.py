@@ -513,177 +513,108 @@ def _fetch_html(url: str):
 
 _NEWS_SOURCES = {
     "detik": {"display_name": "Detik.com", "tag": "DETIK", "domain": "detik.com", "priority": 1},
-    "cnn": {"display_name": "CNN Indonesia", "tag": "CNN", "domain": "cnnindonesia.com", "priority": 2},
-    "antara": {"display_name": "Antara News", "tag": "ANTARA", "domain": "antaranews.com", "priority": 3},
-    "liputan6": {"display_name": "Liputan6 (Cek Fakta)", "tag": "LIPUTAN6", "domain": "liputan6.com", "priority": 4},
-    "republika": {"display_name": "Republika", "tag": "REPUBLIKA", "domain": "republika.co.id", "priority": 5},
-    "suara": {"display_name": "Suara.com", "tag": "SUARA", "domain": "suara.com", "priority": 6},
-    "okezone": {"display_name": "Okezone", "tag": "OKEZONE", "domain": "okezone.com", "priority": 7},
+    "antara": {"display_name": "Antara News", "tag": "ANTARA", "domain": "antaranews.com", "priority": 2},
+    "liputan6": {"display_name": "Liputan6 (Cek Fakta)", "tag": "LIPUTAN6", "domain": "liputan6.com", "priority": 3},
+    "republika": {"display_name": "Republika", "tag": "REPUBLIKA", "domain": "republika.co.id", "priority": 4},
+    "suara": {"display_name": "Suara.com", "tag": "SUARA", "domain": "suara.com", "priority": 5},
 }
 
 
-def _parse_detik(html: str):
-    """Parse hasil search Detik.com."""
+# NEWS PARSERS
+def _parse_detik(html):
     results = []
     soup = BeautifulSoup(html, _BS4_PARSER)
-    for a in soup.select("article a[href]"):
+    seen = set()
+    for a in soup.find_all('a', href=True):
         try:
-            href = a.get("href", "")
+            href = a['href']
             title = a.get_text(strip=True)
-            if not (title and "detik.com" in href and "/search" not in href and len(title) > 25):
-                continue
-            results.append({"title": title[:200], "url": href, "excerpt": "", "date": ""})
-        except (AttributeError, KeyError, TypeError):
-            continue
-        if len(results) >= 10:
-            break
+            if not title or len(title) < 20: continue
+            if not any(x in href for x in ['/d-', '/berita-', '/read/']): continue
+            if '/search' in href or 'connect.detik' in href: continue
+            if href in seen: continue
+            seen.add(href)
+            results.append({'title': title[:200], 'url': href, 'excerpt': '', 'date': ''})
+        except: continue
+        if len(results) >= 10: break
     return results
 
-
-def _parse_antara(html: str):
-    """Parse hasil search Antara News (URL pattern: /berita/{id}/{slug})."""
+def _parse_antara(html):
     results = []
     soup = BeautifulSoup(html, _BS4_PARSER)
-    for a in soup.select("a[href]"):
+    seen = set()
+    for a in soup.find_all('a', href=True):
         try:
-            href = a.get("href", "")
+            href = a['href']
             title = a.get_text(strip=True)
-            if not (title and "/berita/" in href and 25 < len(title) < 250):
-                continue
-            if "/kategori/" in href or "/topic/" in href:
-                continue
-            results.append({"title": title[:200], "url": href, "excerpt": "", "date": ""})
-        except (AttributeError, KeyError, TypeError):
-            continue
-        if len(results) >= 10:
-            break
+            if not title or len(title) < 20: continue
+            if '/berita/' not in href: continue
+            if any(x in href for x in ['/kategori/', '/topic/', '/tag/', '/warta/', '/rilis/']): continue
+            if href in seen: continue
+            seen.add(href)
+            results.append({'title': title[:200], 'url': href, 'excerpt': '', 'date': ''})
+        except: continue
+        if len(results) >= 10: break
     return results
 
-
-def _parse_liputan6(html: str):
-    """Parse hasil search Liputan6 (URL pattern: /cek-fakta/read/{id}/{slug} atau /news/read/...)."""
+def _parse_liputan6(html):
     results = []
     soup = BeautifulSoup(html, _BS4_PARSER)
-    for a in soup.select("a[href]"):
+    seen = set()
+    for a in soup.find_all('a', href=True):
         try:
-            href = a.get("href", "")
+            href = a['href']
             title = a.get_text(strip=True)
-            is_cek_fakta = "/cek-fakta/" in href
-            is_news = "/read/" in href
-            if not (title and "liputan6.com" in href and (is_cek_fakta or is_news)
-                    and 25 < len(title) < 250):
-                continue
-            results.append({
-                "title": title[:200], "url": href, "excerpt": "", "date": "",
-                "is_cek_fakta": is_cek_fakta,
-            })
-        except (AttributeError, KeyError, TypeError):
-            continue
-        if len(results) >= 10:
-            break
+            if not title or len(title) < 20: continue
+            is_cek = '/cek-fakta/' in href
+            is_news = '/read/' in href
+            if not (is_cek or is_news): continue
+            if href in seen: continue
+            seen.add(href)
+            results.append({'title': title[:200], 'url': href, 'excerpt': '', 'date': '', 'is_cek_fakta': is_cek})
+        except: continue
+        if len(results) >= 10: break
     return results
 
-
-def _parse_republika(html: str):
-    """Parse hasil search Republika (URL pattern: /berita/{id}/{slug})."""
+def _parse_republika(html):
     results = []
     soup = BeautifulSoup(html, _BS4_PARSER)
-    for a in soup.select("a[href]"):
+    seen = set()
+    for a in soup.find_all('a', href=True):
         try:
-            href = a.get("href", "")
+            href = a['href']
             title = a.get_text(strip=True)
-            if not (title and "republika.co.id" in href and "/berita/" in href
-                    and 25 < len(title) < 250):
-                continue
-            results.append({"title": title[:200], "url": href, "excerpt": "", "date": ""})
-        except (AttributeError, KeyError, TypeError):
-            continue
-        if len(results) >= 10:
-            break
+            if not title or len(title) < 20: continue
+            if '/berita/' not in href: continue
+            if any(x in href for x in ['/tv/', '/tag/', '/iklan/', '/login']): continue
+            if href in seen: continue
+            seen.add(href)
+            results.append({'title': title[:200], 'url': href, 'excerpt': '', 'date': ''})
+        except: continue
+        if len(results) >= 10: break
     return results
 
-
-def _parse_suara(html: str):
-    """Parse hasil search Suara.com."""
+def _parse_suara(html):
     results = []
     soup = BeautifulSoup(html, _BS4_PARSER)
-    for a in soup.select("a[href]"):
+    seen = set()
+    for a in soup.find_all('a', href=True):
         try:
-            href = a.get("href", "")
+            href = a['href']
             title = a.get_text(strip=True)
-            if not (title and "suara.com" in href and "/search" not in href
-                    and 25 < len(title) < 250):
-                continue
-            if any(seg in href for seg in ["category", "/author/"]):
-                continue
-            results.append({"title": title[:200], "url": href, "excerpt": "", "date": ""})
-        except (AttributeError, KeyError, TypeError):
-            continue
-        if len(results) >= 10:
-            break
-    return results
-
-
-def _parse_okezone(html: str):
-    """Parse hasil search Okezone (URL pattern: /read/{year}/{month}/{id}/{slug})."""
-    results = []
-    soup = BeautifulSoup(html, _BS4_PARSER)
-    for a in soup.select("a[href]"):
-        try:
-            href = a.get("href", "")
-            title = a.get_text(strip=True)
-            if not (title and "okezone.com" in href and "/read/" in href
-                    and 25 < len(title) < 250):
-                continue
-            results.append({"title": title[:200], "url": href, "excerpt": "", "date": ""})
-        except (AttributeError, KeyError, TypeError):
-            continue
-        if len(results) >= 10:
-            break
-    return results
-
-
-def _parse_cnn(html: str):
-    """Parse hasil search CNN Indonesia."""
-    results = []
-    soup = BeautifulSoup(html, _BS4_PARSER)
-    for a in soup.select("a[href]"):
-        try:
-            href = a.get("href", "")
-            title = a.get_text(strip=True)
-            if not (title and "cnnindonesia.com" in href and "/search" not in href
-                    and 25 < len(title) < 250):
-                continue
-            if any(seg in href for seg in ["category", "/author/", "/tag/"]):
-                continue
-            results.append({"title": title[:200], "url": href, "excerpt": "", "date": ""})
-        except (AttributeError, KeyError, TypeError):
-            continue
-        if len(results) >= 10:
-            break
+            if not title or len(title) < 20: continue
+            if 'suara.com' not in href: continue
+            if any(x in href for x in ['/author/', '/tag/', 'javascript', '#', '/ads/', '/login']): continue
+            if not any(x in href for x in ['/news/', '/entertainment/', '/sports/', '/lifestyle/', '/techno/', '/finance/', '/bola/']): continue
+            if href in seen: continue
+            seen.add(href)
+            results.append({'title': title[:200], 'url': href, 'excerpt': '', 'date': ''})
+        except: continue
+        if len(results) >= 10: break
     return results
 
 
 
-_PARSERS = {
-    "detik": _parse_detik,
-    "cnn": _parse_cnn,
-    "antara": _parse_antara,
-    "liputan6": _parse_liputan6,
-    "republika": _parse_republika,
-    "suara": _parse_suara,
-    "okezone": _parse_okezone,
-}
-
-_SEARCH_URL_TEMPLATES = {
-    "detik": lambda q: "https://www.detik.com/search/searchall?query=" + urllib.parse.quote_plus(q),
-    "cnn": lambda q: "https://www.cnnindonesia.com/search/?query=" + urllib.parse.quote_plus(q),
-    "antara": lambda q: "https://www.antaranews.com/search/?q=" + urllib.parse.quote_plus(q),
-    "liputan6": lambda q: "https://www.liputan6.com/search?q=" + urllib.parse.quote_plus(q),
-    "republika": lambda q: "https://www.republika.co.id/search?q=" + urllib.parse.quote_plus(q),
-    "suara": lambda q: "https://www.suara.com/search?q=" + urllib.parse.quote_plus(q),
-    "okezone": lambda q: "https://search.okezone.com/search?q=" + urllib.parse.quote_plus(q),
-}
 
 
 def _search_single_source(source_key, query, max_results=3):
@@ -780,6 +711,18 @@ def search_news_multi_source(query, max_per_source=3, enabled_sources=None, fetc
         elif "source" not in item:
             item["source"] = sk or "Media"
         # excerpt -> snippet
+        if "snippet" not in item:
+            item["snippet"] = item.get("excerpt", "")
+        if "body" not in item:
+            item["body"] = item.get("snippet", "")
+
+    # Normalize keys for display + _build_scraped_context
+    for item in final:
+        sk = item.get("source_key", "")
+        if sk in _NEWS_SOURCES:
+            item["source"] = _NEWS_SOURCES[sk]["display_name"]
+        elif "source" not in item:
+            item["source"] = sk or "Media"
         if "snippet" not in item:
             item["snippet"] = item.get("excerpt", "")
         if "body" not in item:
