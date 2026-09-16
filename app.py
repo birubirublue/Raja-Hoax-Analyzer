@@ -792,14 +792,23 @@ def search_news_multi_source(query, max_per_source=3, enabled_sources=None, fetc
     return final
 
 
-def retry_api_call(func, max_retries=3, delay=2):
+def retry_api_call(func, max_retries=5, delay=3):
+    """Retry Gemini API calls on rate limit (429) / server errors (500/503).
+    Gemini free tier: 15 req/min. Backoff: 3s, 6s, 12s, 24s, 48s."""
     for attempt in range(max_retries):
         try:
             return func()
         except Exception as e:
             err = str(e)
-            if attempt < max_retries - 1 and any(x in err for x in ["429", "quota", "500", "503"]):
-                time.sleep(delay * (attempt + 1))
+            err_lower = err.lower()
+            is_retryable = any(x in err_lower for x in [
+                "429", "quota", "rate", "limit", "exhausted",
+                "500", "503", "502", "504",
+                "service", "unavailable", "overloaded"
+            ])
+            if attempt < max_retries - 1 and is_retryable:
+                wait = delay * (2 ** attempt)
+                time.sleep(wait)
                 continue
             raise
 
@@ -1034,7 +1043,7 @@ def analisis_hoax(teks, api_key, scraped_articles=None):
         if any(x in err_str for x in ["API key", "401", "403", "unauthenticated", "PERMISSION_DENIED"]):
             raise GeminiAPIError("API Key tidak valid atau tidak punya akses.") from e
         if any(x in err_str.lower() for x in ["429", "quota", "rate limit", "RESOURCE_EXHAUSTED"]):
-            raise GeminiAPIError("Rate limit / quota terlampaui.") from e
+            raise GeminiAPIError("Rate limit Gemini tercapai. Tunggu 1-2 menit lalu coba lagi. Untuk free tier: maks 15 request/menit.") from e
         if any(x in err_str.lower() for x in ["timeout", "deadline", "DEADLINE_EXCEEDED"]):
             raise GeminiAPIError("Request timeout ke Gemini.") from e
         if any(x in err_str for x in ["not found", "404", "model"]):
@@ -1268,6 +1277,9 @@ with tab1:
     # Inisialisasi loading state
     if "is_analyzing" not in st.session_state:
         st.session_state.is_analyzing = False
+    # Rate limit tracking
+    if "gemini_calls" not in st.session_state:
+        st.session_state.gemini_calls = []  # list of timestamps
     if "last_result" not in st.session_state:
         st.session_state.last_result = None
 
@@ -1313,7 +1325,16 @@ with tab1:
                         teks, API_KEY,
                         scraped_articles=all_articles
                     )
-                    st.success("Analisis selesai!")
+                    # Track API call for rate limit awareness
+                    import time as time_module
+                    st.session_state.gemini_calls.append(time_module.time())
+                    # Clean old calls (> 1 minute)
+                    cutoff = time_module.time() - 60
+                    st.session_state.gemini_calls = [t for t in st.session_state.gemini_calls if t > cutoff]
+                    st.success("Analisis selesai! (" + str(len(st.session_state.gemini_calls)) + "/15 req dalam 1 menit)")
+
+                    if len(st.session_state.gemini_calls) > 10:
+                        st.warning("Penggunaan API sudah tinggi (" + str(len(st.session_state.gemini_calls)) + "/15). Tunggu sebentar sebelum analisis berikutnya.")
                     st.divider()
 
                     c1, c2 = st.columns([2, 1])
