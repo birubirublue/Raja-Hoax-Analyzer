@@ -417,7 +417,7 @@ def fetch_direct_articles(urls: list) -> list:
                     "source": src_label,
                     "date": date,
                     "snippet": body[:800],
-                    "body": body,
+                    "body": (body[:1500] if len(body) > 1500 else body),
                     "is_direct": True
                 })
                 _LOGGER.info(f"Fetched direct: {title[:80]}")
@@ -1109,19 +1109,28 @@ def analisis_hoax(teks, api_key, scraped_articles=None):
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as je:
-        logger.warning("JSON parse gagal, coba extract substring. Error: %s", je)
+        logger.warning("JSON parse gagal, coba recover. Error: %s", je)
+        data = None
+        # Coba1: cari JSON lengkap
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if match:
             try:
                 data = json.loads(match.group())
-            except json.JSONDecodeError as je2:
-                logger.error("JSON extract tetap gagal: %s", je2)
-                raise InvalidResponseError(
-                    "Respons Gemini bukan JSON valid. Raw (300 char): " + raw[:300]
-                ) from je2
-        else:
+            except json.JSONDecodeError:
+                pass
+        if data is None:
+            # Coba2: tutup JSON terpotong
+            raw2 = raw.strip()
+            if raw2.startswith("{") and not raw2.rstrip().endswith("}"):
+                raw2 = re.sub(r',\s*$', ' }', raw2)
+                raw2 = re.sub(r',\s*"[^"]*\s*$', ' }', raw2)
+                try:
+                    data = json.loads(raw2)
+                except json.JSONDecodeError:
+                    pass
+        if data is None:
             raise InvalidResponseError(
-                "Respons Gemini tidak mengandung JSON. Raw (300 char): " + raw[:300]
+                "Respons Gemini tidak valid. Raw (500 char): " + raw[:500]
             )
 
     try:
@@ -1416,7 +1425,7 @@ with tab1:
                     # --- Multi-Source News Widget (reuse display_articles) ---
                     st.subheader("📰 Pencarian di Media Indonesia")
                     if display_articles:
-                        sources_found = sorted(set(a["source"] for a in display_articles))
+                        sources_found = sorted(set(a.get("source", a.get("source_key", "?")) for a in display_articles))
                         st.success(
                             "Ditemukan " + str(len(display_articles)) + " artikel dari "
                             + str(len(sources_found)) + " media: "
