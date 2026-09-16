@@ -1,0 +1,23 @@
+[theme]
+primaryColor = "#3b82f6"
+backgroundColor = "#0f172a"
+secondaryBackgroundColor = "#1e293b"
+textColor = "#f1f5f9"
+font = "sans serif"
+
+[server]
+# Maksimal upload 5 MB (sesuai dengan scraper MAX_RESPONSE_BYTES)
+maxUploadSize = 5
+# Enable WebSocket compression untuk performa lebih baik
+enableWebSocketCompression = true
+# Run tanpa watchdog (performa lebih cepat di server)
+runOnSave = false
+
+[browser]
+# Hilangkan "running..." indikator
+gatherUsageStats = false
+
+[client]
+# Auto-reconnect lebih cepat
+toolbarMode = "minimal"
+showErrorDetails = true
