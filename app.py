@@ -680,7 +680,7 @@ def _search_single_source(source_key, query, max_results=3):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def search_news_multi_source(query, max_per_source=3, enabled_sources=None):
+def search_news_multi_source(query, max_per_source=3, enabled_sources=None, fetch_body=True):
     """Search berita dari beberapa sumber media Indonesia secara sequential.
 
     Args:
