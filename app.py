@@ -71,7 +71,8 @@ HISTORY_DIR = Path.home() / ".hoaxraja"
 HISTORY_FILE = HISTORY_DIR / "history.json"
 MAX_HISTORY_ITEMS = 50
 HISTORY_DISPLAY_LIMIT = 10
-MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB - safety cap untuk scraping
+MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+_ANTHROPIC_PROXY = "https://gateway.olagon.site/anthropic"  # 5 MB - safety cap untuk scraping
 SCRAPER_RETRIES = 3
 SCRAPER_BACKOFF = 1.5  # detik
 
@@ -945,7 +946,7 @@ def build_system_prompt(current_date, date_window_start, date_window_end):
 
 
 
-def analisis_hoax(teks, api_key, scraped_articles=None):
+def analisis_hoax_gemini(teks, api_key, scraped_articles=None):
     client = genai.Client(api_key=api_key)
     model = model_name or "gemini-3.5-flash"
     # Inject current date context so Gemini doesn't mistake recent dates as "future"
@@ -1159,9 +1160,30 @@ with st.sidebar:
     if not API_KEY:
         st.warning("Masukkan GEMINI_API_KEY di Secrets (production) atau sidebar (dev)")
     st.divider()
-    # Fixed model: Gemini 3.5 Flash
-    model_name = "gemini-3.5-flash"
     st.subheader("Opsi Analisis")
+    model_choice = st.selectbox(
+        "Model AI",
+        ["gemini-3.5-flash", "claude-haiku"],
+        index=0,
+        format_func=lambda x: {
+            "gemini-3.5-flash": "Google Gemini 3.5 Flash",
+            "claude-haiku": "Claude Haiku (Olagon Proxy)",
+        }.get(x, x),
+        help="Gemini: gratis 20 req/hari. Claude Haiku: via reverse proxy.",
+    )
+    if model_choice == "claude-haiku":
+        try:
+            CLAUDE_KEY = st.secrets.get("CLAUDE_API_KEY", "")
+        except Exception:
+            CLAUDE_KEY = ""
+        if not CLAUDE_KEY:
+            CLAUDE_KEY = os.getenv("CLAUDE_API_KEY", "")
+        if not CLAUDE_KEY:
+            CLAUDE_KEY = st.text_input(
+                "CLAUDE_API_KEY", type="password", placeholder="sk-...",
+            )
+        if not CLAUDE_KEY:
+            st.warning("Masukkan CLAUDE_API_KEY untuk Claude Haiku.")
     use_search = st.checkbox(
         "Verifikasi via Google Search (Grounding)", value=False,
         help="Aktifkan untuk pencarian fakta otomatis"
@@ -1281,8 +1303,9 @@ with tab1:
             with st.spinner("Gemini sedang menganalisis..."):
                 try:
                     hasil, sumber = analisis_hoax(
-                        teks, API_KEY,
-                        scraped_articles=all_articles
+                        teks, active_key,
+                        scraped_articles=all_articles,
+                        model_choice=model_choice,
                     )
                     # Track API call for rate limit awareness
                     import time as time_module
@@ -1561,4 +1584,72 @@ st.markdown(
     "<div class='author-credit'>Dikembangkan oleh <strong>Raja Adedia Davarel Pratama</strong><br/><em>Dibuat dengan bantuan AI</em></div>",
     unsafe_allow_html=True,
 )
+
+
+def analisis_hoax(teks, api_key, scraped_articles=None, model_choice=None):
+    model_choice = model_choice or "gemini-3.5-flash"
+    if model_choice == "claude-haiku":
+        return analisis_hoax_claude(teks, api_key, scraped_articles)
+    return analisis_hoax_gemini(teks, api_key, scraped_articles, model_choice)
+
+
+def analisis_hoax_claude(teks, api_key, scraped_articles=None):
+    from datetime import datetime
+    now = datetime.now()
+    current_date = now.strftime("%d %B %Y")
+    date_window_start = now.replace(year=now.year - 1).strftime("%d %B %Y")
+    date_window_end = now.replace(day=min(now.day, 28)).replace(month=12).replace(year=now.year + 1).strftime("%d %B %Y")
+    sp = build_system_prompt(current_date, date_window_start, date_window_end)
+    full_text = _build_scraped_context(teks, scraped_articles)
+    headers = {
+        "Authorization": "Bearer " + api_key,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+    }
+    payload = {
+        "model": "claude-haiku-4-20250514",
+        "max_tokens": 2048,
+        "temperature": 0.4,
+        "system": sp,
+        "messages": [{"role": "user", "content": full_text}],
+    }
+    try:
+        resp = requests.post(_ANTHROPIC_PROXY + "/v1/messages",
+            headers=headers, json=payload, timeout=60)
+        if resp.status_code != 200:
+            raise GeminiAPIError("Claude error " + str(resp.status_code) + ": " + resp.text[:300])
+        data = resp.json()
+    except requests.RequestException as ex:
+        raise GeminiAPIError("Claude request failed: " + str(ex)) from ex
+
+    raw = ""
+    for block in data.get("content", []):
+        if block.get("type") == "text":
+            raw = block["text"]
+            break
+    if not raw:
+        raise InvalidResponseError("Claude returned empty response.")
+
+    # Parse JSON
+    try:
+        json_data = json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            try:
+                json_data = json.loads(m.group())
+            except json.JSONDecodeError:
+                json_data = None
+        else:
+            json_data = None
+        if json_data is None:
+            raise InvalidResponseError("Claude response is not valid JSON.")
+
+    try:
+        hasil = HoaxAnalysis(**json_data)
+    except (ValidationError, TypeError):
+        raise InvalidResponseError("Claude response schema invalid.")
+
+    return hasil, []
+
 
