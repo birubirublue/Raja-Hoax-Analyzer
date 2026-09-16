@@ -805,17 +805,21 @@ SYSTEM_PROMPT_BASE = (
 )
 
 SEARCH_INSTRUCTION = (
-    "\n\nVERIFIKASI FAKTA VIA GOOGLE SEARCH (JIKA TOOL TERSEDIA):\n"
-    "Kamu memiliki akses ke Google Search sebagai tool. Gunakan tool tersebut untuk "
-    "MEMVERIFIKASI klaim faktual utama SEBELUM memberi skor akhir.\n\n"
-    "Langkah-langkah verifikasi:\n"
-    "1. Identifikasi klaim faktual (nama tokoh, peristiwa, angka, tanggal).\n"
-    "2. Gunakan tool google_search untuk cek fakta dari sumber kredibel.\n"
-    "3. Bandingkan dengan sumber tepercaya (Kompas, Detik, BBC, Reuters, "
-    "TurnBackHoax.id, situs resmi pemerintah, dll).\n"
-    "4. Isi field ringkasan_verifikasi dengan ringkasan temuan Anda.\n"
-    "5. Sesuaikan probabilitas_hoax: jika terkonfirmasi faktual turun, "
-    "jika tidak ada sumber kredibel yang mendukung naik."
+    "\n\nVERIFIKASI FAKTA VIA GOOGLE SEARCH (GROUNDING - WAJIB DILAKUKAN):\n"
+    "Kamu memiliki akses ke Google Search untuk GROUNDING. "
+    "Hasil pencarian akan dipakai sebagai BASIS faktual untuk responsmu.\n\n"
+    "Langkah-langkah WAJIB:\n"
+    "1. Identifikasi klaim faktual utama (nama tokoh, peristiwa, angka, tanggal spesifik).\n"
+    "2. Gunakan GROUNDING tool untuk mencari sumber terkini.\n"
+    "3. Sumber prioritas: kemenkeu.go.id, kemkes.go.id, setkab.go.id, "
+    "kompas.com, detik.com, cnnindonesia.com, turnbackhoax.id.\n"
+    "4. Jika hasil pencarian KONTRADIKSI dengan klaim user -> skor >= 71.\n"
+    "5. Jika hasil pencarian MENDUKUNG klaim user -> skor <= 40.\n"
+    "6. Jika TIDAK ADA hasil pencarian -> skor 50-65 (belum bisa diverifikasi).\n"
+    "7. Isi ringkasan_verifikasi dengan temuan grounding (tanggal + sumber).\n"
+    "8. Contoh: Sri Mulyani dilantik sebagai Menkeu 22 Oktober 2024 "
+    "(Kabinet Prabowo-Gibran), BUKAN Purbaya.\n"
+    "9. ERROR FATAL: Knowledge lama tanpa grounding = misinformasi. WAJIB grounding.\n"
 )
 
 def build_system_prompt(current_date, date_window_start, date_window_end):
@@ -846,7 +850,7 @@ def analisis_hoax(teks, api_key, use_search=True, model_name=None):
 
     if use_search:
         prompt = system_prompt_filled + SEARCH_INSTRUCTION
-        tools = [types.Tool(google_search=types.GoogleSearch())]
+        tools = [types.Tool(google_search_retrieval=types.GoogleSearchRetrieval())]
     else:
         prompt = system_prompt_filled
         tools = None
