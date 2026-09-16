@@ -174,6 +174,31 @@ def add_history_entry(teks, hasil, status_label):
     logger.info("History entry added: skor=%d status=%s", entry["skor"], entry["status"])
 
 
+def _build_scraped_context(teks, scraped_articles):
+    if not scraped_articles:
+        return teks
+    parts = [teks, '']
+    parts.append('[BERITA TERKINI - GUNAKAN SEBAGAI FAKTA]:')
+    for i, art in enumerate(scraped_articles[:5], 1):
+        tag = art.get('source_tag', 'Media')
+        title_a = art.get('article_title', art.get('title', ''))
+        date_a = art.get('article_date', '')
+        body_a = art.get('article_body', '')
+        parts.append('')
+        parts.append('[Berita ' + str(i) + ' - ' + tag + ']')
+        if title_a: parts.append('Judul: ' + title_a)
+        if date_a: parts.append('Tanggal: ' + date_a)
+        if body_a: parts.append('Isi: ' + body_a[:2000])
+        elif art.get('title'): parts.append('Judul: ' + art.get('title', ''))
+    parts.append('')
+    parts.append('[ANALISIS]:')
+    parts.append('1. CLAIM KONTRADIKSI berita terkini = HOAX (skor>=71).')
+    parts.append('2. CLAIM DIDUKUNG berita = AMAN (skor<=40).')
+    parts.append('3. TIDAK ADA berita = skor 50-65 (mencurigakan).')
+    return chr(10).join(parts)
+
+
+
 def clear_history():
     """Hapus semua history (session + disk jika persistence enabled)."""
     st.session_state.history = []
@@ -191,6 +216,67 @@ init_history()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def fetch_article_content(url):
+    """Ambil judul, tanggal, body dari article URL."""
+    if not url or "://" not in url:
+        return {}
+    try:
+        h = {"User-Agent": "Mozilla/5.0", "Accept-Language": "id-ID"}
+        r = requests.get(url, headers=h, timeout=8, stream=True)
+        if r.status_code != 200:
+            return {}
+        data = b""
+        for c in r.iter_content(4096):
+            data += c
+            if len(data) > 50000:
+                data = data[:50000]
+                break
+        r.close()
+        html = data.decode("utf-8", errors="replace")
+    except:
+        return {}
+    try:
+        soup = BeautifulSoup(html, _BS4_PARSER)
+    except:
+        return {}
+    title = ""
+    for t in soup.find_all("meta", property="og:title"):
+        title = t.get("content", "")
+        break
+    if not title:
+        t = soup.find("title")
+        title = t.get_text(strip=True) if t else ""
+    date = ""
+    for d in soup.find_all("meta", property="article:published_time"):
+        date = d.get("content", "")[:10]
+        break
+    if not date:
+        for d in soup.find_all("time"):
+            dt = d.get("datetime") or d.get_text(strip=True)
+            date = dt[:10]
+            if date:
+                break
+    sels = [{"class": "detail__body"}, {"class": "itp_bodycontent"},
+            {"itemprop": "articleBody"}, {"class": "post-content"}]
+    texts = []
+    for sel in sels:
+        el = soup.find("div", sel) or soup.find("article") or soup.find("main")
+        if el:
+            for p in el.find_all("p"):
+                t = p.get_text(strip=True)
+                if len(t) > 40 and not any(x in t.lower() for x in ["cookie", "javascript", "subscribe"]):
+                    texts.append(t)
+            if texts:
+                break
+    if not texts:
+        for p in soup.find_all("p"):
+            t = p.get_text(strip=True)
+            if 50 < len(t) < 500:
+                texts.append(t)
+    return {"title": title[:200], "date": date, "body": " ".join(texts)[:3000], "source": url}
+
+
+
 def _fetch_turnbackhoax_html(url: str) -> Optional[str]:
     """Fetch HTML dari TurnBackHoax.id dengan retry + backoff + size cap.
 
@@ -569,7 +655,7 @@ def _search_single_source(source_key, query, max_results=3):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def search_news_multi_source(query, max_per_source=2, enabled_sources=None):
+def search_news_multi_source(query, max_per_source=3, enabled_sources=None):
     """Search berita dari beberapa sumber media Indonesia secara sequential.
 
     Args:
@@ -833,7 +919,7 @@ def build_system_prompt(current_date, date_window_start, date_window_end):
 
 
 
-def analisis_hoax(teks, api_key, use_search=True, model_name=None):
+def analisis_hoax(teks, api_key, model_name=None):
     client = genai.Client(api_key=api_key)
     model = model_name or "gemini-3.5-flash"
     # Inject current date context so Gemini doesn't mistake recent dates as "future"
@@ -848,16 +934,14 @@ def analisis_hoax(teks, api_key, use_search=True, model_name=None):
         date_window_end=date_window_end,
     )
 
-    if use_search:
-        prompt = system_prompt_filled + SEARCH_INSTRUCTION
-        tools = [types.Tool(google_search_retrieval=types.GoogleSearchRetrieval())]
-    else:
-        prompt = system_prompt_filled
-        tools = None
+    prompt = system_prompt_filled
+    tools = None
+
+    full_text = _build_scraped_context(teks, scraped_articles)
 
     def _call():
         return client.models.generate_content(
-            model=model, contents=teks,
+            model=model, contents=full_text,
             config=types.GenerateContentConfig(
                 system_instruction=prompt,
                 response_mime_type="application/json",
@@ -1119,8 +1203,7 @@ with tab1:
                 try:
                     hasil, sumber = analisis_hoax(
                         teks, API_KEY,
-                        use_search=use_search,
-                        model_name=selected_model
+                        scraped_articles=news_results
                     )
                     st.success("Analisis selesai!")
                     st.divider()
@@ -1198,8 +1281,9 @@ with tab1:
                     with st.spinner("Mencari artikel di " + str(len(selected_sources)) + " media..."):
                         news_results = search_news_multi_source(
                             teks,
-                            max_per_source=2,
+                            max_per_source=3,
                             enabled_sources=selected_sources,
+                            fetch_body=True,
                         )
                         # Kelompokkan per source untuk ringkasan
                         per_source_count = {}
