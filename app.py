@@ -944,7 +944,7 @@ def build_system_prompt(current_date, date_window_start, date_window_end):
 
 
 
-def analisis_hoax(teks, api_key, model_name=None):
+def analisis_hoax(teks, api_key, scraped_articles=None):
     client = genai.Client(api_key=api_key)
     model = model_name or "gemini-3.5-flash"
     # Inject current date context so Gemini doesn't mistake recent dates as "future"
