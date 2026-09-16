@@ -1,4 +1,0 @@
-# System packages untuk Streamlit Cloud deployment
-# libxml2 + libxslt biasanya sudah pre-installed tapi explicit untuk safety
-libxml2-dev
-libxslt1-dev

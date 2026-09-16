@@ -21,6 +21,13 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
 
+# Tentukan parser BeautifulSoup (lxml lebih cepat, fallback html.parser jika tidak ada)
+_BS4_PARSER = "lxml"
+try:
+    BeautifulSoup("<html></html>", "lxml")
+except Exception:
+    _BS4_PARSER = "html.parser"
+
 # ============================================================
 # LOGGING
 # ============================================================
@@ -288,7 +295,7 @@ def search_turnbackhoax(query, max_results=5):
         return []
 
     try:
-        soup = BeautifulSoup(html, "lxml")
+        soup = BeautifulSoup(html, _BS4_PARSER)
         # Ambil lebih dari yang dibutuhkan untuk filtering
         cards = soup.select(".news-card-v")[:max_results * 3]
 
@@ -354,7 +361,7 @@ def get_latest_hoaxes_tbh(max_results=8):
         return []
     results = []
     try:
-        soup = BeautifulSoup(html, "lxml")
+        soup = BeautifulSoup(html, _BS4_PARSER)
         cards = soup.select(".news-card-v")[:max_results]
         seen_urls = set()
         for card in cards:
@@ -396,7 +403,7 @@ _NEWS_SOURCES = {
 def _parse_detik(html: str):
     """Parse hasil search Detik.com."""
     results = []
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, _BS4_PARSER)
     for a in soup.select("article a[href]"):
         try:
             href = a.get("href", "")
@@ -414,7 +421,7 @@ def _parse_detik(html: str):
 def _parse_antara(html: str):
     """Parse hasil search Antara News (URL pattern: /berita/{id}/{slug})."""
     results = []
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, _BS4_PARSER)
     for a in soup.select("a[href]"):
         try:
             href = a.get("href", "")
@@ -434,7 +441,7 @@ def _parse_antara(html: str):
 def _parse_liputan6(html: str):
     """Parse hasil search Liputan6 (URL pattern: /cek-fakta/read/{id}/{slug} atau /news/read/...)."""
     results = []
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, _BS4_PARSER)
     for a in soup.select("a[href]"):
         try:
             href = a.get("href", "")
@@ -458,7 +465,7 @@ def _parse_liputan6(html: str):
 def _parse_republika(html: str):
     """Parse hasil search Republika (URL pattern: /berita/{id}/{slug})."""
     results = []
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, _BS4_PARSER)
     for a in soup.select("a[href]"):
         try:
             href = a.get("href", "")
@@ -477,7 +484,7 @@ def _parse_republika(html: str):
 def _parse_suara(html: str):
     """Parse hasil search Suara.com."""
     results = []
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, _BS4_PARSER)
     for a in soup.select("a[href]"):
         try:
             href = a.get("href", "")
@@ -498,7 +505,7 @@ def _parse_suara(html: str):
 def _parse_okezone(html: str):
     """Parse hasil search Okezone (URL pattern: /read/{year}/{month}/{id}/{slug})."""
     results = []
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, _BS4_PARSER)
     for a in soup.select("a[href]"):
         try:
             href = a.get("href", "")
