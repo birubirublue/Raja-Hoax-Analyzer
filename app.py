@@ -333,6 +333,99 @@ _TBH_STOPWORDS = frozenset({
 })
 
 
+
+# ── URL Extraction ──────────────────────────────────────────
+def _extract_urls_from_text(text):
+    import re
+    pattern = re.compile(r'https?://[^\s<>\'"]+')
+    urls = pattern.findall(text)
+    return list(dict.fromkeys(u.rstrip(".,;:)") for u in urls))
+
+
+# ── Direct Article Fetcher ──────────────────────────────────
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_direct_articles(urls: list) -> list:
+    articles = []
+    for url in urls:
+        url = url.strip()
+        if not url:
+            continue
+        try:
+            resp = _fetch_with_retry(url, timeout=12)
+            if resp.status_code != 200:
+                continue
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # Title
+            title_tag = (
+                soup.find("meta", property="og:title")
+                or soup.find("meta", property="twitter:title")
+                or soup.find("h1")
+            )
+            if title_tag:
+                title = title_tag.get("content", title_tag.get_text(strip=True) if hasattr(title_tag, "get_text") else "")
+            else:
+                title = ""
+
+            # Date
+            date_meta = (
+                soup.find("meta", property="article:published_time")
+                or soup.find("meta", property="og:article:published_time")
+                or soup.find("time")
+            )
+            if date_meta:
+                date = date_meta.get("content", date_meta.get_text(strip=True) if hasattr(date_meta, "get_text") else "")
+            else:
+                date = ""
+
+            # Body paragraphs
+            body_tags = soup.find_all("p")
+            paragraphs = []
+            skip_classes = {"tags", "share", "related", "trending", "sidebar", "advertisement", "baca-juga"}
+            for p in body_tags:
+                cls = p.get("class", [])
+                cls_lower = [c.lower() for c in cls]
+                if any(sc in cl for sc in skip_classes for cl in cls_lower):
+                    continue
+                text = p.get_text(strip=True)
+                if len(text) > 40:
+                    paragraphs.append(text)
+
+            body = " ".join(paragraphs)[:4000]
+
+            # Source label
+            src_label = "Detik"
+            if "cnn" in url:
+                src_label = "CNN Indonesia"
+            elif "kompas" in url:
+                src_label = "Kompas"
+            elif "liputan6" in url:
+                src_label = "Liputan6"
+            elif "republika" in url:
+                src_label = "Republika"
+            elif "antara" in url:
+                src_label = "Antara"
+            elif "suara" in url:
+                src_label = "Suara"
+            elif "okezone" in url:
+                src_label = "Okezone"
+
+            if body and len(body) > 100:
+                articles.append({
+                    "title": title[:300],
+                    "url": url,
+                    "source": src_label,
+                    "date": date,
+                    "snippet": body[:800],
+                    "body": body,
+                    "is_direct": True
+                })
+                _LOGGER.info(f"Fetched direct: {title[:80]}")
+        except Exception as e:
+            _LOGGER.warning(f"Direct fetch error for {url}: {e}")
+            continue
+    return articles
+
 def _extract_keywords(text: str, min_len: int = 4) -> list:
     """Ekstrak keyword penting dari teks (skip stopwords)."""
     return [
@@ -1217,18 +1310,37 @@ with tab1:
             st.error("Masukkan GEMINI_API_KEY di sidebar untuk memulai analisis.")
         else:
             # Fetch scraped articles SEBELUM analisis_hoax
-            with st.spinner("Mencari artikel terkait di media Indonesia..."):
-                news_results = search_news_multi_source(
-                    teks,
-                    max_per_source=3,
-                    enabled_sources=selected_sources,
-                    fetch_body=True,
-                )
-            with st.spinner("Gemini sedang menganalisis... Mohon tunggu..."):
+            # Extract URLs from pasted text and fetch directly
+            direct_articles = []
+            if selected_sources:
+                extracted_urls = _extract_urls_from_text(teks)
+                if extracted_urls:
+                    with st.spinner(f"Mengambil {len(extracted_urls)} artikel langsung..."):
+                        direct_articles = fetch_direct_articles(extracted_urls)
+
+                # Search media for additional context
+                with st.spinner("Mencari artikel terkait di media Indonesia..."):
+                    news_results = search_news_multi_source(
+                        teks,
+                        max_per_source=3,
+                        enabled_sources=selected_sources,
+                        fetch_body=True,
+                    )
+
+            # Merge: direct articles first, then search results
+            all_articles = direct_articles.copy()
+            for art in news_results:
+                if art["url"] not in [a["url"] for a in all_articles]:
+                    all_articles.append(art)
+
+            # Remove is_direct flag for display
+            display_articles = [{k: v for k, v in a.items() if k != "is_direct"} for a in all_articles]
+
+            with st.spinner("Gemini sedang menganalisis..."):
                 try:
                     hasil, sumber = analisis_hoax(
                         teks, API_KEY,
-                        scraped_articles=news_results
+                        scraped_articles=all_articles
                     )
                     st.success("Analisis selesai!")
                     st.divider()
@@ -1301,37 +1413,26 @@ with tab1:
                         st.warning("Tidak ada artikel spesifik di TurnBackHoax.id untuk klaim ini. Kemungkinan klaim ini BELUM diverifikasi oleh TurnBackHoax, atau topiknya tidak terkait dengan isu Indonesia. Jangan langsung percaya, verifikasi manual ke sumber resmi.")
                     st.divider()
 
-                    # --- Multi-Source News Widget ---
+                    # --- Multi-Source News Widget (reuse display_articles) ---
                     st.subheader("📰 Pencarian di Media Indonesia")
-                    with st.spinner("Mencari artikel di " + str(len(selected_sources)) + " media..."):
-                        news_results = search_news_multi_source(
-                            teks,
-                            max_per_source=3,
-                            enabled_sources=selected_sources,
-                            fetch_body=True,
-                        )
-                        # Kelompokkan per source untuk ringkasan
-                        per_source_count = {}
-                        for r in news_results:
-                            sk = r.get("source_key", "?")
-                            per_source_count[sk] = per_source_count.get(sk, 0) + 1
-
-                    if news_results:
-                        sources_found = sorted(per_source_count.keys())
+                    if display_articles:
+                        sources_found = sorted(set(a["source"] for a in display_articles))
                         st.success(
-                            "Ditemukan " + str(len(news_results)) + " artikel dari "
+                            "Ditemukan " + str(len(display_articles)) + " artikel dari "
                             + str(len(sources_found)) + " media: "
                             + ", ".join(sources_found)
                         )
-                        for item in news_results:
-                            tag = item.get("source_tag", "?")
+                        for item in display_articles[:10]:
+                            tag = item.get("source_tag", item["source"].lower())
                             cek_fakta_html = (
                                 '<span class="cek-fakta-badge">🛡️ CEK FAKTA</span>'
                                 if item.get("is_cek_fakta") else ""
                             )
+                            direct_html = '<span style="color:#e67e22;font-size:0.8em;">📎 Langsung</span>'
                             source_badge = (
                                 '<span class="source-badge source-' + tag + '">'
-                                + tag + '</span>'
+                                + item["source"] + '</span> '
+                                + direct_html
                             )
                             html = (
                                 '<div class="news-widget">'
