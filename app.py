@@ -1216,6 +1216,14 @@ with tab1:
         elif not API_KEY:
             st.error("Masukkan GEMINI_API_KEY di sidebar untuk memulai analisis.")
         else:
+            # Fetch scraped articles SEBELUM analisis_hoax
+            with st.spinner("Mencari artikel terkait di media Indonesia..."):
+                news_results = search_news_multi_source(
+                    teks,
+                    max_per_source=3,
+                    enabled_sources=selected_sources,
+                    fetch_body=True,
+                )
             with st.spinner("Gemini sedang menganalisis... Mohon tunggu..."):
                 try:
                     hasil, sumber = analisis_hoax(
