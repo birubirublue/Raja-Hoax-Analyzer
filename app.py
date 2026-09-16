@@ -21,10 +21,10 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
 
-# Tentukan parser BeautifulSoup (lxml lebih cepat, fallback html.parser jika tidak ada)
-_BS4_PARSER = "lxml"
+# Tentukan parser BeautifulSoup (html.parser only - lxml removed)
+_BS4_PARSER = "html.parser"
 try:
-    BeautifulSoup("<html></html>", "lxml")
+    BeautifulSoup("<html></html>", _BS4_PARSER)
 except Exception:
     _BS4_PARSER = "html.parser"
 
@@ -180,16 +180,20 @@ def _build_scraped_context(teks, scraped_articles):
     parts = [teks, '']
     parts.append('[BERITA TERKINI - GUNAKAN SEBAGAI FAKTA]:')
     for i, art in enumerate(scraped_articles[:5], 1):
-        tag = art.get('source_tag', 'Media')
-        title_a = art.get('article_title', art.get('title', ''))
-        date_a = art.get('article_date', '')
-        body_a = art.get('article_body', '')
+        # Support both key naming conventions
+        tag = art.get('source', art.get('source_tag', 'Media'))
+        title_a = art.get('title', art.get('article_title', ''))
+        date_a = art.get('date', art.get('article_date', ''))
+        body_a = art.get('body', art.get('snippet', art.get('article_body', '')))
+        if not body_a:
+            body_a = art.get('excerpt', '')
         parts.append('')
         parts.append('[Berita ' + str(i) + ' - ' + tag + ']')
         if title_a: parts.append('Judul: ' + title_a)
         if date_a: parts.append('Tanggal: ' + date_a)
-        if body_a: parts.append('Isi: ' + body_a[:2000])
-        elif art.get('title'): parts.append('Judul: ' + art.get('title', ''))
+        if body_a: parts.append('Isi: ' + body_a[:1500])
+        if not body_a and art.get('title'):
+            parts.append('Judul: ' + art.get('title', ''))
     parts.append('')
     parts.append('[ANALISIS]:')
     parts.append('1. CLAIM KONTRADIKSI berita terkini = HOAX (skor>=71).')
@@ -213,69 +217,6 @@ def clear_history():
 
 # Inisialisasi history saat app start
 init_history()
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_article_content(url):
-    """Ambil judul, tanggal, body dari article URL."""
-    if not url or "://" not in url:
-        return {}
-    try:
-        h = {"User-Agent": "Mozilla/5.0", "Accept-Language": "id-ID"}
-        r = requests.get(url, headers=h, timeout=8, stream=True)
-        if r.status_code != 200:
-            return {}
-        data = b""
-        for c in r.iter_content(4096):
-            data += c
-            if len(data) > 50000:
-                data = data[:50000]
-                break
-        r.close()
-        html = data.decode("utf-8", errors="replace")
-    except:
-        return {}
-    try:
-        soup = BeautifulSoup(html, _BS4_PARSER)
-    except:
-        return {}
-    title = ""
-    for t in soup.find_all("meta", property="og:title"):
-        title = t.get("content", "")
-        break
-    if not title:
-        t = soup.find("title")
-        title = t.get_text(strip=True) if t else ""
-    date = ""
-    for d in soup.find_all("meta", property="article:published_time"):
-        date = d.get("content", "")[:10]
-        break
-    if not date:
-        for d in soup.find_all("time"):
-            dt = d.get("datetime") or d.get_text(strip=True)
-            date = dt[:10]
-            if date:
-                break
-    sels = [{"class": "detail__body"}, {"class": "itp_bodycontent"},
-            {"itemprop": "articleBody"}, {"class": "post-content"}]
-    texts = []
-    for sel in sels:
-        el = soup.find("div", sel) or soup.find("article") or soup.find("main")
-        if el:
-            for p in el.find_all("p"):
-                t = p.get_text(strip=True)
-                if len(t) > 40 and not any(x in t.lower() for x in ["cookie", "javascript", "subscribe"]):
-                    texts.append(t)
-            if texts:
-                break
-    if not texts:
-        for p in soup.find_all("p"):
-            t = p.get_text(strip=True)
-            if 50 < len(t) < 500:
-                texts.append(t)
-    return {"title": title[:200], "date": date, "body": " ".join(texts)[:3000], "source": url}
-
-
 
 def _fetch_turnbackhoax_html(url: str) -> Optional[str]:
     """Fetch HTML dari TurnBackHoax.id dengan retry + backoff + size cap.
@@ -418,11 +359,12 @@ def fetch_direct_articles(urls: list) -> list:
                     "date": date,
                     "snippet": body[:800],
                     "body": (body[:1500] if len(body) > 1500 else body),
-                    "is_direct": True
+                    "is_direct": True,
+                    "source_tag": src_label.lower(),
                 })
-                _LOGGER.info(f"Fetched direct: {title[:80]}")
+                logger.info(f"Fetched direct: {title[:80]}")
         except Exception as e:
-            _LOGGER.warning(f"Direct fetch error for {url}: {e}")
+            logger.warning(f"Direct fetch error for {url}: {e}")
             continue
     return articles
 
@@ -829,6 +771,20 @@ def search_news_multi_source(query, max_per_source=3, enabled_sources=None, fetc
             seen_urls.add(url)
             final.append(item)
 
+    # Normalize keys for _build_scraped_context compatibility
+    for item in final:
+        # Set 'source' from _NEWS_SOURCES registry
+        sk = item.get("source_key", "")
+        if sk in _NEWS_SOURCES:
+            item["source"] = _NEWS_SOURCES[sk]["display_name"]
+        elif "source" not in item:
+            item["source"] = sk or "Media"
+        # excerpt -> snippet
+        if "snippet" not in item:
+            item["snippet"] = item.get("excerpt", "")
+        if "body" not in item:
+            item["body"] = item.get("snippet", "")
+
     logger.info(
         "Multi-source search '%s' -> %d artikel dari %d sumber aktif",
         keywords[:3], len(final), len(enabled_sources),
@@ -1119,13 +1075,17 @@ def analisis_hoax(teks, api_key, scraped_articles=None):
             except json.JSONDecodeError:
                 pass
         if data is None:
-            # Coba2: tutup JSON terpotong
+            # Coba2: tutup JSON terpotong - truncate at last complete field
             raw2 = raw.strip()
             if raw2.startswith("{") and not raw2.rstrip().endswith("}"):
-                raw2 = re.sub(r',\s*$', ' }', raw2)
-                raw2 = re.sub(r',\s*"[^"]*\s*$', ' }', raw2)
+                last_comma = raw2.rfind(",")
+                if last_comma > 0:
+                    raw2 = raw2[:last_comma] + '" }'
+                else:
+                    raw2 = raw2 + '" }'
                 try:
                     data = json.loads(raw2)
+                    logger.info("JSON recovered via field truncation")
                 except json.JSONDecodeError:
                     pass
         if data is None:
@@ -1337,7 +1297,9 @@ with tab1:
                     )
 
             # Merge: direct articles first, then search results
-            all_articles = direct_articles.copy()
+            all_articles = []
+            if selected_sources:
+                all_articles = direct_articles.copy()
             for art in news_results:
                 if art["url"] not in [a["url"] for a in all_articles]:
                     all_articles.append(art)
