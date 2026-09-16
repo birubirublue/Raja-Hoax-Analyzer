@@ -852,10 +852,10 @@ def validate_teks_input(teks):
 # ============================================================
 
 class HoaxAnalysis(BaseModel):
-    probabilitas_hoax: int = Field(..., ge=0, le=100)
-    analisis_bahasa: str
-    cek_fakta: str
-    kesimpulan: str
+    probabilitas_hoax: int = Field(default=50, ge=0, le=100)
+    analisis_bahasa: str = Field(default="Tidak dapat menganalisis.")
+    cek_fakta: str = Field(default="Tidak dapat memverifikasi.")
+    kesimpulan: str = Field(default="Tidak ada kesimpulan.")
     ringkasan_verifikasi: str = Field(default="")
 
 
@@ -1043,7 +1043,7 @@ def analisis_hoax(teks, api_key, scraped_articles=None):
         if any(x in err_str for x in ["API key", "401", "403", "unauthenticated", "PERMISSION_DENIED"]):
             raise GeminiAPIError("API Key tidak valid atau tidak punya akses.") from e
         if any(x in err_str.lower() for x in ["429", "quota", "rate limit", "RESOURCE_EXHAUSTED"]):
-            raise GeminiAPIError("Rate limit Gemini tercapai. Tunggu 1-2 menit lalu coba lagi. Untuk free tier: maks 15 request/menit.") from e
+            raise GeminiAPIError("Rate limit Gemini tercapai. Tunggu 1-2 menit lalu coba lagi. Untuk free tier: maks 20 request/hari. Cek https://ai.dev/rate-limit.") from e
         if any(x in err_str.lower() for x in ["timeout", "deadline", "DEADLINE_EXCEEDED"]):
             raise GeminiAPIError("Request timeout ke Gemini.") from e
         if any(x in err_str for x in ["not found", "404", "model"]):
@@ -1084,17 +1084,33 @@ def analisis_hoax(teks, api_key, scraped_articles=None):
             except json.JSONDecodeError:
                 pass
         if data is None:
-            # Coba2: tutup JSON terpotong - truncate at last complete field
+            # Smart JSON recovery - find last balanced field
             raw2 = raw.strip()
-            if raw2.startswith("{") and not raw2.rstrip().endswith("}"):
-                last_comma = raw2.rfind(",")
-                if last_comma > 0:
-                    raw2 = raw2[:last_comma] + '" }'
-                else:
-                    raw2 = raw2 + '" }'
+            if raw2.startswith("{"):
+                last_brace = raw2.rfind("}")
+                if last_brace < 0:
+                    last_brace = len(raw2)
+                prefix = raw2[:last_brace]
+                # Find last comma that's end of a complete field
+                pos = len(prefix) - 1
+                in_str = False
+                depth = 0
+                found = -1
+                while pos >= 0:
+                    c = prefix[pos]
+                    if c == '"' and (pos == 0 or prefix[pos-1] != "\\"):
+                        in_str = not in_str
+                    elif not in_str:
+                        if c == "}": depth += 1
+                        elif c == "{": depth -= 1
+                        elif c == "," and depth == 0:
+                            found = pos
+                            break
+                    pos -= 1
+                recovered = prefix[:found] + "}" if found > 0 else raw2[:last_brace+1] if last_brace > 0 else raw2
                 try:
-                    data = json.loads(raw2)
-                    logger.info("JSON recovered via field truncation")
+                    data = json.loads(recovered)
+                    logger.info("JSON recovered smart truncate (%d->%d chars)", len(raw2), len(recovered))
                 except json.JSONDecodeError:
                     pass
         if data is None:
@@ -1107,7 +1123,7 @@ def analisis_hoax(teks, api_key, scraped_articles=None):
     except (ValidationError, TypeError) as ve:
         logger.error("Pydantic validation gagal: %s", ve)
         raise InvalidResponseError(
-            "Schema respons Gemini tidak sesuai. Cek field wajib: "
+            "Respons Gemini tidak lengkap/rusak. "
             "probabilitas_hoax, analisis_bahasa, cek_fakta, kesimpulan, "
             "ringkasan_verifikasi."
         ) from ve
