@@ -1323,7 +1323,7 @@ with tab1:
             with st.spinner("Gemini sedang menganalisis..."):
                 try:
                     hasil, sumber = analisis_hoax(
-                        teks, active_key,
+                        teks, API_KEY,
                         scraped_articles=all_articles,
                         model_choice=model_choice,
                     )
