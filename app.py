@@ -1672,4 +1672,4 @@ def analisis_hoax_claude(teks, api_key, scraped_articles=None):
 
     return hasil, []
 
-
+# Force rebuild v2
