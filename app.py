@@ -1,3 +1,4 @@
+# FORCE_BUILD_MARKER_v3_2026
 """HoaxRaja - Analisa Hoax Indonesia"""
 import streamlit as st
 import os
