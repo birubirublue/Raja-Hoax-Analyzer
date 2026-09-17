@@ -1322,7 +1322,7 @@ with tab1:
 
             with st.spinner("Gemini sedang menganalisis..."):
                 try:
-                    hasil, sumber = analisis_hoax_main(
+                    hasil, sumber = hoaxr_analyze(
                         teks, API_KEY,
                         scraped_articles=all_articles,
                         model_choice=model_choice,
@@ -1606,7 +1606,7 @@ st.markdown(
 )
 
 
-def analisis_hoax_main(teks, api_key, scraped_articles=None, model_choice=None):
+def hoaxr_analyze(teks, api_key, scraped_articles=None, model_choice=None):
     model_choice = model_choice or "gemini-3.5-flash"
     if model_choice == "claude-haiku":
         return analisis_hoax_claude(teks, api_key, scraped_articles)
